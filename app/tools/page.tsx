@@ -1,0 +1,623 @@
+'use client'
+
+import Image from "next/image"
+import { CSSProperties, useEffect, useRef, useState } from "react"
+import Link from "next/link"
+
+import { Button } from "@/components/ui/button"
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import { cn } from "@/lib/utils"
+
+const tools = [
+  { value: "remove-bg", label: "Remove Background" },
+  { value: "png-to-jpg", label: "Convert Formats" },
+]
+
+const convertFormats = [
+  { value: "jpg", label: "Convert to JPG" },
+  { value: "webp", label: "Convert to WebP" },
+  { value: "avif", label: "Convert to AVIF" },
+  { value: "png", label: "Convert to PNG" },
+]
+
+export default function ToolsPage() {
+  const [preview, setPreview] = useState<string | null>(null)
+  const [processedImage, setProcessedImage] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [convertPreview, setConvertPreview] = useState<string | null>(null)
+  const [convertFormat, setConvertFormat] = useState(convertFormats[0].value)
+  const [convertLoading, setConvertLoading] = useState(false)
+  const [convertMessage, setConvertMessage] = useState<string | null>(null)
+  const [convertResult, setConvertResult] = useState<string | null>(null)
+  const [convertFileName, setConvertFileName] = useState<string>("converted")
+  const [convertOriginalName, setConvertOriginalName] = useState<string | null>(null)
+  const convertInputRef = useRef<HTMLInputElement>(null)
+  const [activeTool, setActiveTool] = useState(tools[0].value)
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  const navItems = [
+    { id: "home", label: "Home", href: "/#home" },
+    { id: "about", label: "About", href: "/#about" },
+    { id: "how", label: "How it works", href: "/#how" },
+  ]
+
+  useEffect(() => {
+    return () => {
+      if (processedImage) {
+        URL.revokeObjectURL(processedImage)
+      }
+    }
+  }, [processedImage])
+
+  useEffect(() => {
+    return () => {
+      if (convertResult) {
+        URL.revokeObjectURL(convertResult)
+      }
+    }
+  }, [convertResult])
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    setError(null)
+    const reader = new FileReader()
+    reader.onload = (readerEvent) => {
+      setPreview(readerEvent.target?.result as string)
+      setProcessedImage(null)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleRemoveBackground = async () => {
+    if (!fileInputRef.current?.files?.[0]) {
+      setError("Select an image to get started.")
+      return
+    }
+
+    setLoading(true)
+    setError(null)
+
+    try {
+      const formData = new FormData()
+      formData.append("file", fileInputRef.current.files[0])
+
+      const response = await fetch("/api/remove-background", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        throw new Error("Failed to remove background")
+      }
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      setProcessedImage(url)
+    } catch (err) {
+      console.error("Error:", err)
+      setError("We couldn't process that image. Please try another file.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleReset = () => {
+    setPreview(null)
+    setProcessedImage(null)
+    setError(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
+  }
+
+  const handleConvertFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (readerEvent) => {
+      setConvertPreview(readerEvent.target?.result as string)
+      setConvertMessage(null)
+      setConvertResult(null)
+      setConvertOriginalName(file.name)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const handleConvertReset = () => {
+    setConvertPreview(null)
+    setConvertMessage(null)
+    setConvertResult(null)
+    setConvertOriginalName(null)
+    if (convertInputRef.current) {
+      convertInputRef.current.value = ""
+    }
+  }
+
+  const handleConvert = async () => {
+    if (!convertInputRef.current?.files?.[0]) {
+      setConvertMessage("Choose an image first.")
+      return
+    }
+
+    setConvertLoading(true)
+    setConvertMessage(null)
+    setConvertResult(null)
+
+    try {
+      const formData = new FormData()
+      formData.append("file", convertInputRef.current.files[0])
+      formData.append("targetFormat", convertFormat)
+
+      const response = await fetch("/api/convert", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const errorResponse = await response.json().catch(() => null)
+        const message =
+          errorResponse?.error || "Conversion failed. Please try again later."
+        throw new Error(message)
+      }
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      setConvertResult(url)
+      const fallbackName = `converted.${convertFormat}`
+      const contentDisposition = response.headers.get("Content-Disposition")
+      const matchedFilename =
+        contentDisposition?.match(/filename="(.+)"/)?.[1] || fallbackName
+      setConvertFileName(matchedFilename)
+      setConvertMessage("Conversion complete. Download your file below.")
+    } catch (err) {
+      console.error("Conversion error:", err)
+      setConvertMessage(
+        err instanceof Error ? err.message : "Conversion failed. Please try again."
+      )
+    } finally {
+      setConvertLoading(false)
+    }
+  }
+
+  const renderPlaceholder = (label: string, description: string) => (
+    <div className="flex h-full flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-neutral-200 bg-neutral-50/50 p-6 text-center text-neutral-500 transition-colors">
+      <div className="flex h-10 w-10 items-center justify-center rounded-full border border-neutral-200 bg-white text-neutral-400">
+        <svg
+          width="18"
+          height="18"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 5v14m7-7H5" />
+        </svg>
+      </div>
+      <div className="space-y-1">
+        <p className="text-sm font-medium text-neutral-600">{label}</p>
+        <p className="text-xs text-neutral-500">{description}</p>
+      </div>
+    </div>
+  )
+
+  const checkerboardStyle: CSSProperties = {
+    backgroundImage:
+      "linear-gradient(45deg, #f3f3f3 25%, transparent 25%, transparent 75%, #f3f3f3 75%), linear-gradient(45deg, #f3f3f3 25%, transparent 25%, transparent 75%, #f3f3f3 75%)",
+    backgroundSize: "16px 16px",
+    backgroundPosition: "0 0, 8px 8px",
+    backgroundColor: "#ffffff",
+  }
+
+  const renderRemoveSection = () => (
+    <Card className="rounded-3xl border transition-colors">
+      <CardHeader className="space-y-1.5">
+        <CardTitle className="text-lg font-semibold">Remove background</CardTitle>
+        <p className="text-sm text-neutral-500">
+          Upload a photo, preview the cutout, and download instantly.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileSelect}
+        />
+        <div
+          className={cn(
+            "relative flex min-h-[280px] w-full cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-6 text-center transition-all",
+            "border-neutral-200 bg-neutral-50/50",
+            "hover:border-neutral-300 hover:bg-neutral-100/50"
+          )}
+          onClick={() => fileInputRef.current?.click()}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault()
+              fileInputRef.current?.click()
+            }
+          }}
+          style={processedImage ? checkerboardStyle : undefined}
+        >
+          {processedImage || preview ? (
+            <div className="relative aspect-[4/5] w-full overflow-hidden rounded-2xl border border-neutral-200 bg-white sm:aspect-video">
+              <Image
+                src={(processedImage as string) || (preview as string)}
+                alt={processedImage ? "Background removed preview" : "Uploaded preview"}
+                fill
+                sizes="(max-width: 640px) 100vw, (max-width: 1024px) 80vw, 640px"
+                className="object-contain"
+                unoptimized
+              />
+            </div>
+          ) : (
+            renderPlaceholder("Drop image or browse", "PNG • JPG • WEBP up to 12 MB")
+          )}
+          {processedImage ? (
+            <span className="mt-4 rounded-full bg-neutral-900 px-3 py-1 text-xs font-semibold uppercase tracking-[0.25em] text-white">
+              Background removed
+            </span>
+          ) : (
+            <span className="mt-4 text-xs font-medium text-neutral-500">
+              Click to upload or drag & drop
+            </span>
+          )}
+          {loading && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center rounded-2xl bg-white/90 backdrop-blur-sm text-neutral-700">
+              <div className="relative mb-3 h-12 w-12">
+                <div className="absolute inset-0 animate-spin rounded-full border-2 border-neutral-200 border-t-neutral-900" />
+                <div className="animate-pulse-ring absolute inset-1 rounded-full border-2 border-neutral-200" />
+              </div>
+              <p className="text-sm font-medium">Removing background…</p>
+              <div className="mt-3 h-1.5 w-28 overflow-hidden rounded-full bg-neutral-200">
+                <div className="animate-shimmer h-full w-1/3 rounded-full bg-neutral-900" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {error && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            {error}
+          </div>
+        )}
+
+        {processedImage && (
+          <p className="text-xs text-neutral-500">
+            Transparent areas are shown using the checkerboard pattern above.
+          </p>
+        )}
+      </CardContent>
+      <CardFooter className="flex items-center justify-between gap-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleReset}
+          disabled={!preview && !processedImage}
+          className="h-9 w-9 rounded-full"
+          aria-label="Clear"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M18 6L6 18" />
+            <path d="M6 6l12 12" />
+          </svg>
+        </Button>
+        <div className="flex flex-1 items-center justify-center gap-2">
+          <Button
+            onClick={handleRemoveBackground}
+            disabled={loading || !preview}
+            className="flex-1 max-w-xs"
+          >
+            {loading ? "Processing…" : "Remove background"}
+          </Button>
+          {processedImage && (
+            <Button asChild variant="secondary" className="flex-1 max-w-xs">
+              <a
+                href={processedImage}
+                download="removed-bg.png"
+              >
+                Download PNG
+              </a>
+            </Button>
+          )}
+        </div>
+        <div className="w-9" />
+      </CardFooter>
+    </Card>
+  )
+
+  const renderConvertSection = () => (
+    <Card className="rounded-3xl border transition-colors">
+      <CardHeader className="space-y-1.5">
+        <CardTitle className="text-lg font-semibold">Convert formats</CardTitle>
+        <p className="text-sm text-neutral-500">
+          Upload any PNG, JPG, or WebP and download it in another format.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <input
+          ref={convertInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          className="hidden"
+          onChange={handleConvertFileSelect}
+        />
+        
+        <div className="flex flex-col sm:flex-row gap-4">
+          <div className="flex-1">
+            <div
+              className={cn(
+                "relative flex min-h-[280px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-6 text-center transition-all",
+                "border-neutral-200 bg-neutral-50/50",
+                "hover:border-neutral-300 hover:bg-neutral-100/50"
+              )}
+              onClick={() => convertInputRef.current?.click()}
+              role="button"
+              tabIndex={0}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault()
+                  convertInputRef.current?.click()
+                }
+              }}
+            >
+              {convertPreview ? (
+                <div className="relative h-full w-full overflow-hidden rounded-xl">
+                  <Image
+                    src={convertPreview}
+                    alt="Source preview"
+                    fill
+                    sizes="(max-width: 768px) 100vw, 400px"
+                    className="object-contain"
+                    unoptimized
+                  />
+                </div>
+              ) : (
+                renderPlaceholder("Drop file or browse", "PNG • JPG • WEBP")
+              )}
+            </div>
+          </div>
+
+          {convertResult && (
+            <div className="flex-1">
+              <div
+                className="relative flex min-h-[280px] flex-col items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50/50 p-6"
+                style={checkerboardStyle}
+              >
+                <div className="relative h-full w-full overflow-hidden rounded-xl">
+                  <Image
+                    src={convertResult}
+                    alt="Converted preview"
+                    fill
+                    sizes="(max-width: 768px) 100vw, 400px"
+                    className="object-contain"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3">
+          <div className="flex-1">
+            <Select value={convertFormat} onValueChange={setConvertFormat}>
+              <SelectTrigger className="rounded-2xl">
+                <SelectValue placeholder="Choose format" />
+              </SelectTrigger>
+              <SelectContent>
+                {convertFormats.map((format) => (
+                  <SelectItem key={format.value} value={format.value}>
+                    {format.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {convertOriginalName && (
+            <p className="hidden text-sm text-neutral-500 sm:block">
+              {convertOriginalName}
+            </p>
+          )}
+        </div>
+
+        {convertMessage && (
+          <div className={cn(
+            "rounded-xl border px-3 py-2 text-sm",
+            convertMessage.includes("complete") || convertMessage.includes("success")
+              ? "border-neutral-200 bg-neutral-50 text-neutral-600"
+              : "border-red-200 bg-red-50 text-red-600"
+          )}>
+            {convertMessage}
+          </div>
+        )}
+      </CardContent>
+      <CardFooter className="flex items-center justify-between gap-3">
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={handleConvertReset}
+          disabled={!convertPreview && !convertResult}
+          className="h-9 w-9 rounded-full"
+          aria-label="Reset"
+        >
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M18 6L6 18" />
+            <path d="M6 6l12 12" />
+          </svg>
+        </Button>
+        <div className="flex flex-1 items-center justify-center gap-2">
+          <Button
+            onClick={handleConvert}
+            disabled={convertLoading || !convertPreview}
+            className="flex-1 max-w-xs"
+          >
+            {convertLoading ? "Converting…" : "Convert image"}
+          </Button>
+          {convertResult && (
+            <Button asChild variant="secondary" className="flex-1 max-w-xs">
+              <a
+                href={convertResult}
+                download={convertFileName}
+              >
+                Download {convertFormat.toUpperCase()}
+              </a>
+            </Button>
+          )}
+        </div>
+        <div className="w-9" />
+      </CardFooter>
+    </Card>
+  )
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 640) {
+        setMenuOpen(false)
+      }
+    }
+    window.addEventListener("resize", handleResize)
+    return () => window.removeEventListener("resize", handleResize)
+  }, [])
+
+  return (
+    <main className="min-h-screen bg-white text-neutral-950">
+      <div className="sticky top-0 z-10 border-b border-neutral-200 bg-white/80 backdrop-blur-md">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 text-sm">
+          <Link
+            href="/"
+            className="text-sm font-semibold tracking-[0.3em] text-neutral-900 transition hover:opacity-70"
+          >
+            SALINTOOLS
+          </Link>
+          <nav className="hidden gap-6 sm:flex">
+            {navItems.map((item) => (
+              <Link
+                key={item.id}
+                href={item.href}
+                className="relative px-1 py-0.5 text-sm text-neutral-600 transition-colors hover:text-neutral-900"
+              >
+                <span>{item.label}</span>
+              </Link>
+            ))}
+          </nav>
+          <div className="flex items-center gap-2">
+            <button
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-200 text-neutral-900 transition hover:opacity-70 sm:hidden"
+              onClick={() => setMenuOpen((prev) => !prev)}
+              aria-label="Toggle navigation menu"
+            >
+              <span className="relative block h-4 w-5">
+                <span
+                  className={cn(
+                    "absolute left-0 block h-0.5 w-full rounded-full bg-current transition-transform duration-300",
+                    menuOpen ? "top-1/2 -translate-y-1/2 rotate-45" : "top-0"
+                  )}
+                />
+                <span
+                  className={cn(
+                    "absolute left-0 block h-0.5 w-full rounded-full bg-current transition-all duration-200",
+                    menuOpen ? "opacity-0" : "top-1/2 -translate-y-1/2"
+                  )}
+                />
+                <span
+                  className={cn(
+                    "absolute left-0 block h-0.5 w-full rounded-full bg-current transition-transform duration-300",
+                    menuOpen ? "top-1/2 -translate-y-1/2 -rotate-45" : "bottom-0"
+                  )}
+                />
+              </span>
+            </button>
+          </div>
+        </div>
+        <div
+          className={cn(
+            "sm:hidden overflow-hidden transition-all duration-300",
+            menuOpen ? "max-h-[420px] border-b border-neutral-200" : "max-h-0"
+          )}
+        >
+          <div className="flex flex-col gap-3 px-4 py-5 bg-white/95 backdrop-blur-md">
+            {navItems.map((item) => (
+              <Link
+                key={item.id}
+                href={item.href}
+                className="flex items-center justify-between rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-left text-sm font-medium text-neutral-900 transition hover:bg-neutral-50"
+                onClick={() => setMenuOpen(false)}
+              >
+                {item.label}
+                <span className="text-xs uppercase tracking-[0.3em]">→</span>
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12 sm:px-6">
+        <div className="space-y-3 text-center">
+          <p className="text-xs font-semibold uppercase tracking-[0.4em] text-neutral-500">
+            Toolkit
+          </p>
+          <h1 className="text-3xl font-semibold text-neutral-900">Pick your action</h1>
+          <p className="text-sm text-neutral-600">
+            Choose a tool from the dropdown and your workspace will adapt instantly.
+          </p>
+        </div>
+
+        <div className="mx-auto w-full max-w-sm">
+          <Select value={activeTool} onValueChange={setActiveTool}>
+            <SelectTrigger className="rounded-full px-5 py-6 text-sm">
+              <SelectValue placeholder="Choose a tool" />
+            </SelectTrigger>
+            <SelectContent>
+              {tools.map((tool) => (
+                <SelectItem key={tool.value} value={tool.value}>
+                  {tool.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {activeTool === "remove-bg" ? renderRemoveSection() : renderConvertSection()}
+      </div>
+    </main>
+  )
+}
+

@@ -151,16 +151,36 @@ export default function ToolsPage() {
 
     const reader = new FileReader()
     reader.onload = (readerEvent) => {
-      setConvertPreview(readerEvent.target?.result as string)
-      setConvertMessage(null)
-      setConvertResult(null)
-      setConvertOriginalName(file.name)
+      const result = readerEvent.target?.result as string
+      if (result) {
+        setConvertPreview(result)
+        setConvertMessage(null)
+        setConvertResult(null)
+        setConvertOriginalName(file.name)
+      } else {
+        console.error("FileReader returned no result")
+        setConvertMessage("Could not preview this file. You can still convert it.")
+        setConvertOriginalName(file.name)
+      }
     }
-    reader.onerror = () => {
+    reader.onerror = (error) => {
+      console.error("FileReader error:", error)
       setConvertMessage("Could not preview this file. You can still convert it.")
       setConvertOriginalName(file.name)
+      setConvertPreview(null)
     }
-    reader.readAsDataURL(file)
+    reader.onabort = () => {
+      console.error("FileReader aborted")
+      setConvertMessage("File reading was cancelled.")
+      setConvertPreview(null)
+    }
+    try {
+      reader.readAsDataURL(file)
+    } catch (error) {
+      console.error("Error reading file:", error)
+      setConvertMessage("Could not read file. You can still convert it.")
+      setConvertOriginalName(file.name)
+    }
   }
 
   const handleConvertReset = () => {
@@ -428,14 +448,17 @@ export default function ToolsPage() {
                 </div>
               )}
               {convertPreview ? (
-                <div className="relative h-full w-full overflow-hidden rounded-xl">
-                  <Image
+                <div className="relative flex min-h-[240px] w-full items-center justify-center overflow-hidden rounded-xl bg-white sm:min-h-[280px]">
+                  {/* Use regular img tag for data URLs to avoid Next.js Image restrictions in production */}
+                  <img
                     src={convertPreview}
                     alt="Source preview"
-                    fill
-                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 400px"
-                    className="object-contain"
-                    unoptimized
+                    className="max-h-full max-w-full object-contain"
+                    onError={(e) => {
+                      console.error("Preview image failed to load:", e)
+                      setConvertMessage("Preview failed to load, but you can still convert the file.")
+                      setConvertPreview(null)
+                    }}
                   />
                 </div>
               ) : isHeicFile && convertOriginalName ? (

@@ -24,8 +24,12 @@ export async function POST(request: NextRequest) {
     }
 
     const originalName = file.name;
-    const inputFormat =
-      originalName.split(".").pop()?.toLowerCase() || "png";
+    let inputFormat = originalName.split(".").pop()?.toLowerCase() || "png";
+    
+    // Handle HEIC/HEIF files
+    if (inputFormat === "heic" || inputFormat === "heif") {
+      inputFormat = "heic"; // CloudConvert uses "heic" for both
+    }
 
     // 🔥 1) CREATE JOB — MUST be JSON body, NOT FormData
     const jobResponse = await fetch(`${CLOUDCONVERT_API_BASE}/jobs`, {

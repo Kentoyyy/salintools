@@ -46,6 +46,7 @@ export default function ToolsPage() {
   const [convertResult, setConvertResult] = useState<string | null>(null)
   const [convertFileName, setConvertFileName] = useState<string>("converted")
   const [convertOriginalName, setConvertOriginalName] = useState<string | null>(null)
+  const [isHeicFile, setIsHeicFile] = useState(false)
   const convertInputRef = useRef<HTMLInputElement>(null)
   const [activeTool, setActiveTool] = useState(tools[0].value)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -131,11 +132,32 @@ export default function ToolsPage() {
     const file = event.target.files?.[0]
     if (!file) return
 
+    // Check if file is HEIC/HEIF - browsers can't preview these directly
+    const fileExtension = file.name.split('.').pop()?.toLowerCase()
+    const isHeic = fileExtension === 'heic' || fileExtension === 'heif' || file.type === 'image/heic' || file.type === 'image/heif'
+    
+    if (isHeic) {
+      // For HEIC files, we can't preview them directly in browser
+      // Set a placeholder or convert message
+      setConvertPreview(null)
+      setIsHeicFile(true)
+      setConvertMessage("HEIC file detected. Click 'Convert image' to process.")
+      setConvertResult(null)
+      setConvertOriginalName(file.name)
+      return
+    }
+    
+    setIsHeicFile(false)
+
     const reader = new FileReader()
     reader.onload = (readerEvent) => {
       setConvertPreview(readerEvent.target?.result as string)
       setConvertMessage(null)
       setConvertResult(null)
+      setConvertOriginalName(file.name)
+    }
+    reader.onerror = () => {
+      setConvertMessage("Could not preview this file. You can still convert it.")
       setConvertOriginalName(file.name)
     }
     reader.readAsDataURL(file)
@@ -146,6 +168,7 @@ export default function ToolsPage() {
     setConvertMessage(null)
     setConvertResult(null)
     setConvertOriginalName(null)
+    setIsHeicFile(false)
     if (convertInputRef.current) {
       convertInputRef.current.value = ""
     }
@@ -360,14 +383,14 @@ export default function ToolsPage() {
       <CardHeader className="space-y-1.5 p-4 sm:p-6">
         <CardTitle className="text-base font-semibold sm:text-lg">Convert formats</CardTitle>
         <p className="text-xs text-neutral-500 sm:text-sm">
-          Upload any PNG, JPG, or WebP and download it in another format.
+          Upload any PNG, JPG, WebP, or HEIC and download it in another format.
         </p>
       </CardHeader>
       <CardContent className="space-y-4 p-4 sm:p-6">
         <input
           ref={convertInputRef}
           type="file"
-          accept="image/png,image/jpeg,image/webp"
+          accept="image/png,image/jpeg,image/jpg,image/webp,image/heic,image/heif,.heic,.heif"
           className="hidden"
           onChange={handleConvertFileSelect}
         />
@@ -392,6 +415,18 @@ export default function ToolsPage() {
               }}
               style={{ touchAction: 'manipulation' }}
             >
+              {convertLoading && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-white/95 backdrop-blur-sm text-neutral-700">
+                  <div className="relative mb-3 h-12 w-12">
+                    <div className="absolute inset-0 animate-spin rounded-full border-2 border-neutral-200 border-t-neutral-900" />
+                    <div className="animate-pulse-ring absolute inset-1 rounded-full border-2 border-neutral-200" />
+                  </div>
+                  <p className="text-sm font-medium">Converting…</p>
+                  <div className="mt-3 h-1.5 w-28 overflow-hidden rounded-full bg-neutral-200">
+                    <div className="animate-shimmer h-full w-1/3 rounded-full bg-neutral-900" />
+                  </div>
+                </div>
+              )}
               {convertPreview ? (
                 <div className="relative h-full w-full overflow-hidden rounded-xl">
                   <Image
@@ -403,8 +438,32 @@ export default function ToolsPage() {
                     unoptimized
                   />
                 </div>
+              ) : isHeicFile && convertOriginalName ? (
+                <div className="flex h-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-neutral-300 bg-neutral-100/50 p-6 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-neutral-300 bg-white text-neutral-400">
+                    <svg
+                      width="24"
+                      height="24"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-neutral-700">HEIC File Ready</p>
+                    <p className="text-xs text-neutral-500">{convertOriginalName}</p>
+                    <p className="text-xs text-neutral-400">Preview not available for HEIC files</p>
+                  </div>
+                </div>
               ) : (
-                renderPlaceholder("Drop file or browse", "PNG • JPG • WEBP")
+                renderPlaceholder("Drop file or browse", "PNG • JPG • WEBP • HEIC")
               )}
             </div>
           </div>
@@ -466,7 +525,7 @@ export default function ToolsPage() {
         <div className="flex items-center justify-between gap-2 sm:order-2 sm:flex-1 sm:justify-center">
           <Button
             onClick={handleConvert}
-            disabled={convertLoading || !convertPreview}
+            disabled={convertLoading || (!convertPreview && !isHeicFile)}
             className="flex-1 text-sm sm:max-w-xs"
           >
             {convertLoading ? "Converting…" : "Convert image"}

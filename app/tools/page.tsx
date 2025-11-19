@@ -494,18 +494,19 @@ export default function ToolsPage() {
           {convertResult && (
             <div className="flex-1">
               <div
-                className="relative flex min-h-[240px] flex-col items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50/50 p-4 sm:min-h-[280px] sm:p-6"
+                className="relative flex min-h-[240px] w-full items-center justify-center overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-50/50 p-4 sm:min-h-[280px] sm:p-6"
                 style={checkerboardStyle}
               >
-                <div className="relative h-full w-full overflow-hidden rounded-xl">
-                  <Image
-                    src={convertResult}
-                    alt="Converted preview"
-                    fill
-                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 400px"
-                    className="object-contain"
-                  />
-                </div>
+                {/* Use regular img tag for blob URLs to avoid Next.js Image restrictions in production */}
+                <img
+                  src={convertResult}
+                  alt="Converted preview"
+                  className="max-h-full max-w-full object-contain"
+                  onError={(e) => {
+                    console.error("Converted image failed to load:", e)
+                    setConvertMessage("Converted image preview failed to load, but you can still download it.")
+                  }}
+                />
               </div>
             </div>
           )}

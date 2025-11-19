@@ -228,13 +228,13 @@ export default function ToolsPage() {
 
   const renderRemoveSection = () => (
     <Card className="rounded-3xl border transition-colors">
-      <CardHeader className="space-y-1.5">
-        <CardTitle className="text-lg font-semibold">Remove background</CardTitle>
-        <p className="text-sm text-neutral-500">
+      <CardHeader className="space-y-1.5 p-4 sm:p-6">
+        <CardTitle className="text-base font-semibold sm:text-lg">Remove background</CardTitle>
+        <p className="text-xs text-neutral-500 sm:text-sm">
           Upload a photo, preview the cutout, and download instantly.
         </p>
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-4 p-4 sm:space-y-6 sm:p-6">
         <input
           ref={fileInputRef}
           type="file"
@@ -244,9 +244,10 @@ export default function ToolsPage() {
         />
         <div
           className={cn(
-            "relative flex min-h-[280px] w-full cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-6 text-center transition-all",
+            "relative flex min-h-[240px] w-full cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-4 text-center transition-all sm:min-h-[280px] sm:p-6",
             "border-neutral-200 bg-neutral-50/50",
-            "hover:border-neutral-300 hover:bg-neutral-100/50"
+            "hover:border-neutral-300 hover:bg-neutral-100/50",
+            "touch-manipulation"
           )}
           onClick={() => fileInputRef.current?.click()}
           role="button"
@@ -257,10 +258,10 @@ export default function ToolsPage() {
               fileInputRef.current?.click()
             }
           }}
-          style={processedImage ? checkerboardStyle : undefined}
+          style={{ ...(processedImage ? checkerboardStyle : undefined), touchAction: 'manipulation' }}
         >
           {processedImage || preview ? (
-            <div className="relative aspect-[4/5] w-full overflow-hidden rounded-2xl border border-neutral-200 bg-white sm:aspect-video">
+            <div className="relative aspect-[4/5] w-full overflow-hidden rounded-xl border border-neutral-200 bg-white sm:aspect-video sm:rounded-2xl">
               <Image
                 src={(processedImage as string) || (preview as string)}
                 alt={processedImage ? "Background removed preview" : "Uploaded preview"}
@@ -297,7 +298,7 @@ export default function ToolsPage() {
         </div>
 
         {error && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+          <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 sm:rounded-2xl sm:px-4 sm:py-3 sm:text-sm">
             {error}
           </div>
         )}
@@ -308,13 +309,32 @@ export default function ToolsPage() {
           </p>
         )}
       </CardContent>
-      <CardFooter className="flex items-center justify-between gap-3">
+      <CardFooter className="flex flex-col items-stretch gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+        <div className="flex items-center justify-between gap-2 sm:order-2 sm:flex-1 sm:justify-center">
+          <Button
+            onClick={handleRemoveBackground}
+            disabled={loading || !preview}
+            className="flex-1 text-sm sm:max-w-xs"
+          >
+            {loading ? "Processing…" : "Remove background"}
+          </Button>
+          {processedImage && (
+            <Button asChild variant="secondary" className="flex-1 text-sm sm:max-w-xs">
+              <a
+                href={processedImage}
+                download="removed-bg.png"
+              >
+                Download
+              </a>
+            </Button>
+          )}
+        </div>
         <Button
           variant="ghost"
           size="icon"
           onClick={handleReset}
           disabled={!preview && !processedImage}
-          className="h-9 w-9 rounded-full"
+          className="h-10 w-10 rounded-full self-end sm:order-1 sm:h-9 sm:w-9"
           aria-label="Clear"
         >
           <svg
@@ -331,39 +351,19 @@ export default function ToolsPage() {
             <path d="M6 6l12 12" />
           </svg>
         </Button>
-        <div className="flex flex-1 items-center justify-center gap-2">
-          <Button
-            onClick={handleRemoveBackground}
-            disabled={loading || !preview}
-            className="flex-1 max-w-xs"
-          >
-            {loading ? "Processing…" : "Remove background"}
-          </Button>
-          {processedImage && (
-            <Button asChild variant="secondary" className="flex-1 max-w-xs">
-              <a
-                href={processedImage}
-                download="removed-bg.png"
-              >
-                Download PNG
-              </a>
-            </Button>
-          )}
-        </div>
-        <div className="w-9" />
       </CardFooter>
     </Card>
   )
 
   const renderConvertSection = () => (
     <Card className="rounded-3xl border transition-colors">
-      <CardHeader className="space-y-1.5">
-        <CardTitle className="text-lg font-semibold">Convert formats</CardTitle>
-        <p className="text-sm text-neutral-500">
+      <CardHeader className="space-y-1.5 p-4 sm:p-6">
+        <CardTitle className="text-base font-semibold sm:text-lg">Convert formats</CardTitle>
+        <p className="text-xs text-neutral-500 sm:text-sm">
           Upload any PNG, JPG, or WebP and download it in another format.
         </p>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-4 p-4 sm:p-6">
         <input
           ref={convertInputRef}
           type="file"
@@ -372,13 +372,14 @@ export default function ToolsPage() {
           onChange={handleConvertFileSelect}
         />
         
-        <div className="flex flex-col sm:flex-row gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row">
           <div className="flex-1">
             <div
               className={cn(
-                "relative flex min-h-[280px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-6 text-center transition-all",
+                "relative flex min-h-[240px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-4 text-center transition-all sm:min-h-[280px] sm:p-6",
                 "border-neutral-200 bg-neutral-50/50",
-                "hover:border-neutral-300 hover:bg-neutral-100/50"
+                "hover:border-neutral-300 hover:bg-neutral-100/50",
+                "touch-manipulation"
               )}
               onClick={() => convertInputRef.current?.click()}
               role="button"
@@ -389,6 +390,7 @@ export default function ToolsPage() {
                   convertInputRef.current?.click()
                 }
               }}
+              style={{ touchAction: 'manipulation' }}
             >
               {convertPreview ? (
                 <div className="relative h-full w-full overflow-hidden rounded-xl">
@@ -396,7 +398,7 @@ export default function ToolsPage() {
                     src={convertPreview}
                     alt="Source preview"
                     fill
-                    sizes="(max-width: 768px) 100vw, 400px"
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 400px"
                     className="object-contain"
                     unoptimized
                   />
@@ -410,7 +412,7 @@ export default function ToolsPage() {
           {convertResult && (
             <div className="flex-1">
               <div
-                className="relative flex min-h-[280px] flex-col items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50/50 p-6"
+                className="relative flex min-h-[240px] flex-col items-center justify-center rounded-2xl border border-neutral-200 bg-neutral-50/50 p-4 sm:min-h-[280px] sm:p-6"
                 style={checkerboardStyle}
               >
                 <div className="relative h-full w-full overflow-hidden rounded-xl">
@@ -418,7 +420,7 @@ export default function ToolsPage() {
                     src={convertResult}
                     alt="Converted preview"
                     fill
-                    sizes="(max-width: 768px) 100vw, 400px"
+                    sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 400px"
                     className="object-contain"
                   />
                 </div>
@@ -427,10 +429,10 @@ export default function ToolsPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
           <div className="flex-1">
             <Select value={convertFormat} onValueChange={setConvertFormat}>
-              <SelectTrigger className="rounded-2xl">
+              <SelectTrigger className="w-full rounded-2xl text-sm">
                 <SelectValue placeholder="Choose format" />
               </SelectTrigger>
               <SelectContent>
@@ -451,7 +453,7 @@ export default function ToolsPage() {
 
         {convertMessage && (
           <div className={cn(
-            "rounded-xl border px-3 py-2 text-sm",
+            "rounded-xl border px-3 py-2 text-xs sm:text-sm",
             convertMessage.includes("complete") || convertMessage.includes("success")
               ? "border-neutral-200 bg-neutral-50 text-neutral-600"
               : "border-red-200 bg-red-50 text-red-600"
@@ -460,13 +462,32 @@ export default function ToolsPage() {
           </div>
         )}
       </CardContent>
-      <CardFooter className="flex items-center justify-between gap-3">
+      <CardFooter className="flex flex-col items-stretch gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+        <div className="flex items-center justify-between gap-2 sm:order-2 sm:flex-1 sm:justify-center">
+          <Button
+            onClick={handleConvert}
+            disabled={convertLoading || !convertPreview}
+            className="flex-1 text-sm sm:max-w-xs"
+          >
+            {convertLoading ? "Converting…" : "Convert image"}
+          </Button>
+          {convertResult && (
+            <Button asChild variant="secondary" className="flex-1 text-sm sm:max-w-xs">
+              <a
+                href={convertResult}
+                download={convertFileName}
+              >
+                Download
+              </a>
+            </Button>
+          )}
+        </div>
         <Button
           variant="ghost"
           size="icon"
           onClick={handleConvertReset}
           disabled={!convertPreview && !convertResult}
-          className="h-9 w-9 rounded-full"
+          className="h-10 w-10 rounded-full self-end sm:order-1 sm:h-9 sm:w-9"
           aria-label="Reset"
         >
           <svg
@@ -483,26 +504,6 @@ export default function ToolsPage() {
             <path d="M6 6l12 12" />
           </svg>
         </Button>
-        <div className="flex flex-1 items-center justify-center gap-2">
-          <Button
-            onClick={handleConvert}
-            disabled={convertLoading || !convertPreview}
-            className="flex-1 max-w-xs"
-          >
-            {convertLoading ? "Converting…" : "Convert image"}
-          </Button>
-          {convertResult && (
-            <Button asChild variant="secondary" className="flex-1 max-w-xs">
-              <a
-                href={convertResult}
-                download={convertFileName}
-              >
-                Download {convertFormat.toUpperCase()}
-              </a>
-            </Button>
-          )}
-        </div>
-        <div className="w-9" />
       </CardFooter>
     </Card>
   )
@@ -520,19 +521,19 @@ export default function ToolsPage() {
   return (
     <main className="min-h-screen bg-white text-neutral-950">
       <div className="sticky top-0 z-10 border-b border-neutral-200 bg-white/80 backdrop-blur-md">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-4 text-sm">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-3 py-3 text-sm sm:px-4 sm:py-4">
           <Link
             href="/"
-            className="text-sm font-semibold tracking-[0.3em] text-neutral-900 transition hover:opacity-70"
+            className="text-xs font-semibold tracking-[0.2em] text-neutral-900 transition hover:opacity-70 sm:text-sm sm:tracking-[0.3em]"
           >
             SALINTOOLS
           </Link>
-          <nav className="hidden gap-6 sm:flex">
+          <nav className="hidden gap-4 sm:flex sm:gap-6">
             {navItems.map((item) => (
               <Link
                 key={item.id}
                 href={item.href}
-                className="relative px-1 py-0.5 text-sm text-neutral-600 transition-colors hover:text-neutral-900"
+                className="relative px-1 py-0.5 text-xs text-neutral-600 transition-colors hover:text-neutral-900 sm:text-sm"
               >
                 <span>{item.label}</span>
               </Link>
@@ -540,7 +541,8 @@ export default function ToolsPage() {
           </nav>
           <div className="flex items-center gap-2">
             <button
-              className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-200 text-neutral-900 transition hover:opacity-70 sm:hidden"
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-200 text-neutral-900 transition hover:opacity-70 sm:hidden touch-manipulation"
+              style={{ touchAction: 'manipulation' }}
               onClick={() => setMenuOpen((prev) => !prev)}
               aria-label="Toggle navigation menu"
             >
@@ -573,13 +575,14 @@ export default function ToolsPage() {
             menuOpen ? "max-h-[420px] border-b border-neutral-200" : "max-h-0"
           )}
         >
-          <div className="flex flex-col gap-3 px-4 py-5 bg-white/95 backdrop-blur-md">
+          <div className="flex flex-col gap-3 px-3 py-4 bg-white/95 backdrop-blur-md sm:px-4 sm:py-5">
             {navItems.map((item) => (
               <Link
                 key={item.id}
                 href={item.href}
-                className="flex items-center justify-between rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-left text-sm font-medium text-neutral-900 transition hover:bg-neutral-50"
+                className="flex items-center justify-between rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-left text-sm font-medium text-neutral-900 transition hover:bg-neutral-50 touch-manipulation min-h-[44px]"
                 onClick={() => setMenuOpen(false)}
+                style={{ touchAction: 'manipulation' }}
               >
                 {item.label}
                 <span className="text-xs uppercase tracking-[0.3em]">→</span>
@@ -589,20 +592,20 @@ export default function ToolsPage() {
         </div>
       </div>
 
-      <div className="mx-auto flex max-w-5xl flex-col gap-8 px-4 py-12 sm:px-6">
-        <div className="space-y-3 text-center">
-          <p className="text-xs font-semibold uppercase tracking-[0.4em] text-neutral-500">
+      <div className="mx-auto flex max-w-5xl flex-col gap-6 px-3 py-6 sm:gap-8 sm:px-4 sm:py-8 md:px-6 md:py-12">
+        <div className="space-y-2 text-center sm:space-y-3">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.4em] text-neutral-500 sm:text-xs">
             Toolkit
           </p>
-          <h1 className="text-3xl font-semibold text-neutral-900">Pick your action</h1>
-          <p className="text-sm text-neutral-600">
+          <h1 className="text-2xl font-semibold text-neutral-900 sm:text-3xl">Pick your action</h1>
+          <p className="text-xs text-neutral-600 sm:text-sm">
             Choose a tool from the dropdown and your workspace will adapt instantly.
           </p>
         </div>
 
         <div className="mx-auto w-full max-w-sm">
           <Select value={activeTool} onValueChange={setActiveTool}>
-            <SelectTrigger className="rounded-full px-5 py-6 text-sm">
+            <SelectTrigger className="w-full rounded-full px-4 py-5 text-sm sm:px-5 sm:py-6">
               <SelectValue placeholder="Choose a tool" />
             </SelectTrigger>
             <SelectContent>
@@ -619,8 +622,8 @@ export default function ToolsPage() {
       </div>
 
       <footer className="border-t border-neutral-200 bg-white">
-        <div className="mx-auto max-w-5xl px-4 py-8 text-center">
-          <p className="text-sm text-neutral-500">
+        <div className="mx-auto max-w-5xl px-3 py-6 text-center sm:px-4 sm:py-8">
+          <p className="text-xs text-neutral-500 sm:text-sm">
             Made by Ken ❤️
           </p>
         </div>

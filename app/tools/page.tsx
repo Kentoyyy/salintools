@@ -2,6 +2,7 @@
 
 import Image from "next/image"
 import { CSSProperties, useEffect, useRef, useState } from "react"
+import JSZip from "jszip"
 import Link from "next/link"
 
 import { Button } from "@/components/ui/button"
@@ -23,15 +24,57 @@ import { cn } from "@/lib/utils"
 
 const tools = [
   { value: "remove-bg", label: "Remove Background" },
-  { value: "png-to-jpg", label: "Convert Formats" },
+  { value: "convert-formats", label: "Convert Formats" },
+  { value: "compress-image", label: "Compress Images" },
 ]
 
 const convertFormats = [
   { value: "jpg", label: "Convert to JPG" },
   { value: "webp", label: "Convert to WebP" },
-  { value: "avif", label: "Convert to AVIF" },
   { value: "png", label: "Convert to PNG" },
 ]
+
+type ConvertJobStatus = "idle" | "processing" | "done" | "error"
+
+type ConvertJob = {
+  id: string
+  file: File
+  originalName: string
+  previewUrl: string | null
+  resultUrl: string | null
+  status: ConvertJobStatus
+  message: string | null
+  heic: boolean
+  downloadName?: string
+}
+
+type CompressJob = {
+  id: string
+  file: File
+  originalName: string
+  previewUrl: string | null
+  resultUrl: string | null
+  status: ConvertJobStatus
+  message: string | null
+  percentSaved?: number
+  originalSize?: number
+  compressedSize?: number
+  downloadName?: string
+}
+
+const generateId = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+const formatBytes = (bytes?: number) => {
+  if (!bytes && bytes !== 0) return ""
+  if (bytes < 1024) return `${bytes} B`
+  const kb = bytes / 1024
+  if (kb < 1024) return `${kb.toFixed(1)} KB`
+  const mb = kb / 1024
+  return `${mb.toFixed(1)} MB`
+}
 
 export default function ToolsPage() {
   const [preview, setPreview] = useState<string | null>(null)
@@ -39,15 +82,13 @@ export default function ToolsPage() {
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [convertPreview, setConvertPreview] = useState<string | null>(null)
+  const [convertJobs, setConvertJobs] = useState<ConvertJob[]>([])
   const [convertFormat, setConvertFormat] = useState(convertFormats[0].value)
-  const [convertLoading, setConvertLoading] = useState(false)
-  const [convertMessage, setConvertMessage] = useState<string | null>(null)
-  const [convertResult, setConvertResult] = useState<string | null>(null)
-  const [convertFileName, setConvertFileName] = useState<string>("converted")
-  const [convertOriginalName, setConvertOriginalName] = useState<string | null>(null)
-  const [isHeicFile, setIsHeicFile] = useState(false)
+  const [convertProcessing, setConvertProcessing] = useState(false)
+  const [compressJobs, setCompressJobs] = useState<CompressJob[]>([])
+  const [compressProcessing, setCompressProcessing] = useState(false)
   const convertInputRef = useRef<HTMLInputElement>(null)
+  const compressInputRef = useRef<HTMLInputElement>(null)
   const [activeTool, setActiveTool] = useState(tools[0].value)
   const [menuOpen, setMenuOpen] = useState(false)
 
@@ -65,13 +106,25 @@ export default function ToolsPage() {
     }
   }, [processedImage])
 
-  useEffect(() => {
-    return () => {
-      if (convertResult) {
-        URL.revokeObjectURL(convertResult)
-      }
-    }
-  }, [convertResult])
+  const readFileAsDataURL = (file: File) =>
+    new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result as string)
+      reader.onerror = (error) => reject(error)
+      reader.readAsDataURL(file)
+    })
+
+  const updateConvertJob = (id: string, updates: Partial<ConvertJob>) => {
+    setConvertJobs((prev) =>
+      prev.map((job) => (job.id === id ? { ...job, ...updates } : job))
+    )
+  }
+
+  const updateCompressJob = (id: string, updates: Partial<CompressJob>) => {
+    setCompressJobs((prev) =>
+      prev.map((job) => (job.id === id ? { ...job, ...updates } : job))
+    )
+  }
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
@@ -129,84 +182,72 @@ export default function ToolsPage() {
   }
 
   const handleConvertFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0]
-    if (!file) return
+    const files = Array.from(event.target.files ?? [])
+    if (!files.length) return
 
-    // Check if file is HEIC/HEIF - browsers can't preview these directly
-    const fileExtension = file.name.split('.').pop()?.toLowerCase()
-    const isHeic = fileExtension === 'heic' || fileExtension === 'heif' || file.type === 'image/heic' || file.type === 'image/heif'
-    
-    if (isHeic) {
-      // For HEIC files, we can't preview them directly in browser
-      // Set a placeholder or convert message
-      setConvertPreview(null)
-      setIsHeicFile(true)
-      setConvertMessage("HEIC file detected. Click 'Convert image' to process.")
-      setConvertResult(null)
-      setConvertOriginalName(file.name)
-      return
-    }
-    
-    setIsHeicFile(false)
-
-    const reader = new FileReader()
-    reader.onload = (readerEvent) => {
-      const result = readerEvent.target?.result as string
-      if (result) {
-        setConvertPreview(result)
-        setConvertMessage(null)
-        setConvertResult(null)
-        setConvertOriginalName(file.name)
-      } else {
-        console.error("FileReader returned no result")
-        setConvertMessage("Could not preview this file. You can still convert it.")
-        setConvertOriginalName(file.name)
+    const jobs = files.map((file) => {
+      const extension = file.name.split(".").pop()?.toLowerCase()
+      const heic =
+        extension === "heic" ||
+        extension === "heif" ||
+        file.type === "image/heic" ||
+        file.type === "image/heif"
+      const id = generateId()
+      const job: ConvertJob = {
+        id,
+        file,
+        originalName: file.name,
+        previewUrl: null,
+        resultUrl: null,
+        status: "idle",
+        message: heic ? "HEIC file detected. Preview unavailable but conversion is supported." : null,
+        heic,
       }
-    }
-    reader.onerror = (error) => {
-      console.error("FileReader error:", error)
-      setConvertMessage("Could not preview this file. You can still convert it.")
-      setConvertOriginalName(file.name)
-      setConvertPreview(null)
-    }
-    reader.onabort = () => {
-      console.error("FileReader aborted")
-      setConvertMessage("File reading was cancelled.")
-      setConvertPreview(null)
-    }
-    try {
-      reader.readAsDataURL(file)
-    } catch (error) {
-      console.error("Error reading file:", error)
-      setConvertMessage("Could not read file. You can still convert it.")
-      setConvertOriginalName(file.name)
-    }
-  }
 
-  const handleConvertReset = () => {
-    setConvertPreview(null)
-    setConvertMessage(null)
-    setConvertResult(null)
-    setConvertOriginalName(null)
-    setIsHeicFile(false)
+      if (!heic) {
+        readFileAsDataURL(file)
+          .then((preview) => updateConvertJob(id, { previewUrl: preview }))
+          .catch(() =>
+            updateConvertJob(id, {
+              message: "Could not preview this file. You can still convert it.",
+            })
+          )
+      }
+
+      return job
+    })
+
+    setConvertJobs((prev) => [...prev, ...jobs])
     if (convertInputRef.current) {
       convertInputRef.current.value = ""
     }
   }
 
-  const handleConvert = async () => {
-    if (!convertInputRef.current?.files?.[0]) {
-      setConvertMessage("Choose an image first.")
-      return
+  const handleRemoveConvertJob = (id: string) => {
+    setConvertJobs((prev) => {
+      const job = prev.find((item) => item.id === id)
+      if (job?.resultUrl) {
+        URL.revokeObjectURL(job.resultUrl)
+      }
+      return prev.filter((item) => item.id !== id)
+    })
+  }
+
+  const handleClearConvertJobs = () => {
+    convertJobs.forEach((job) => {
+      if (job.resultUrl) URL.revokeObjectURL(job.resultUrl)
+    })
+    setConvertJobs([])
+    if (convertInputRef.current) {
+      convertInputRef.current.value = ""
     }
+  }
 
-    setConvertLoading(true)
-    setConvertMessage(null)
-    setConvertResult(null)
-
+  const processConvertJob = async (job: ConvertJob) => {
+    updateConvertJob(job.id, { status: "processing", message: null })
     try {
       const formData = new FormData()
-      formData.append("file", convertInputRef.current.files[0])
+      formData.append("file", job.file)
       formData.append("targetFormat", convertFormat)
 
       const response = await fetch("/api/convert", {
@@ -223,21 +264,218 @@ export default function ToolsPage() {
 
       const blob = await response.blob()
       const url = URL.createObjectURL(blob)
-      setConvertResult(url)
-      const fallbackName = `converted.${convertFormat}`
+      const fallbackName = `converted-${job.originalName}.${convertFormat}`
       const contentDisposition = response.headers.get("Content-Disposition")
       const matchedFilename =
         contentDisposition?.match(/filename="(.+)"/)?.[1] || fallbackName
-      setConvertFileName(matchedFilename)
-      setConvertMessage("Conversion complete. Download your file below.")
-    } catch (err) {
-      console.error("Conversion error:", err)
-      setConvertMessage(
-        err instanceof Error ? err.message : "Conversion failed. Please try again."
-      )
-    } finally {
-      setConvertLoading(false)
+
+      updateConvertJob(job.id, {
+        resultUrl: url,
+        status: "done",
+        message: "Conversion complete.",
+        downloadName: matchedFilename,
+      })
+    } catch (error) {
+      console.error("Conversion error:", error)
+      updateConvertJob(job.id, {
+        status: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Conversion failed. Please try again.",
+      })
     }
+  }
+
+  const handleConvertAll = async () => {
+    if (!convertJobs.length) return
+    setConvertProcessing(true)
+    for (const job of convertJobs) {
+      if (job.status === "processing") {
+        continue
+      }
+      if (job.status === "done" && job.resultUrl) {
+        continue
+      }
+      await processConvertJob(job)
+    }
+    setConvertProcessing(false)
+  }
+
+  const handleConvertZipDownload = async () => {
+    const completed = convertJobs.filter((job) => job.resultUrl)
+    if (!completed.length) return
+
+    const zip = new JSZip()
+    for (const job of completed) {
+      if (!job.resultUrl) continue
+      const blob = await fetch(job.resultUrl).then((res) => res.blob())
+      zip.file(job.downloadName || `converted-${job.originalName}`, blob)
+    }
+
+    const zipBlob = await zip.generateAsync({ type: "blob" })
+    const url = URL.createObjectURL(zipBlob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `converted-files-${Date.now()}.zip`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const handleCompressFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? [])
+    if (!files.length) return
+
+    const supported = files.filter((file) => file.type.match(/image\/(png|jpeg|webp)/))
+    const unsupported = files.filter((file) => !file.type.match(/image\/(png|jpeg|webp)/))
+
+    if (unsupported.length) {
+      console.warn(
+        `Skipped ${unsupported.length} unsupported file(s). Only PNG, JPG, or WebP are allowed for compression.`
+      )
+    }
+
+    const jobs = supported.map((file) => {
+      const id = generateId()
+      readFileAsDataURL(file)
+        .then((preview) => updateCompressJob(id, { previewUrl: preview }))
+        .catch(() =>
+          updateCompressJob(id, {
+            message: "Could not preview this file. You can still compress it.",
+          })
+        )
+
+      const job: CompressJob = {
+        id,
+        file,
+        originalName: file.name,
+        previewUrl: null,
+        resultUrl: null,
+        status: "idle",
+        message: null,
+      }
+      return job
+    })
+    setCompressJobs((prev) => [...prev, ...jobs])
+
+    if (compressInputRef.current) {
+      compressInputRef.current.value = ""
+    }
+  }
+
+  const handleRemoveCompressJob = (id: string) => {
+    setCompressJobs((prev) => {
+      const job = prev.find((item) => item.id === id)
+      if (job?.resultUrl) {
+        URL.revokeObjectURL(job.resultUrl)
+      }
+      return prev.filter((item) => item.id !== id)
+    })
+  }
+
+  const handleClearCompressJobs = () => {
+    compressJobs.forEach((job) => {
+      if (job.resultUrl) URL.revokeObjectURL(job.resultUrl)
+    })
+    setCompressJobs([])
+    if (compressInputRef.current) {
+      compressInputRef.current.value = ""
+    }
+  }
+
+  const processCompressJob = async (job: CompressJob) => {
+    updateCompressJob(job.id, { status: "processing", message: null })
+    try {
+      const formData = new FormData()
+      formData.append("file", job.file)
+
+      const response = await fetch("/api/compress", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        const errorResponse = await response.json().catch(() => null)
+        const message =
+          errorResponse?.error || "Compression failed. Please try again later."
+        throw new Error(message)
+      }
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+
+      const originalSizeHeader = response.headers.get("X-Original-Size")
+      const compressedSizeHeader = response.headers.get("X-Compressed-Size")
+      const percentHeader = response.headers.get("X-Percent-Saved")
+
+      const originalSize = originalSizeHeader ? Number(originalSizeHeader) : undefined
+      const compressedSize = compressedSizeHeader ? Number(compressedSizeHeader) : undefined
+      const percentSaved =
+        percentHeader !== null
+          ? Number(percentHeader)
+          : originalSize && compressedSize
+            ? Math.max(0, ((originalSize - compressedSize) / originalSize) * 100)
+            : undefined
+
+      const fallbackName = `compressed-${job.originalName}`
+      const contentDisposition = response.headers.get("Content-Disposition")
+      const matchedFilename =
+        contentDisposition?.match(/filename="(.+)"/)?.[1] || fallbackName
+
+      updateCompressJob(job.id, {
+        resultUrl: url,
+        status: "done",
+        message: "Compression complete.",
+        percentSaved,
+        originalSize,
+        compressedSize,
+        downloadName: matchedFilename,
+      })
+    } catch (error) {
+      console.error("Compression error:", error)
+      updateCompressJob(job.id, {
+        status: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "Compression failed. Please try again.",
+      })
+    }
+  }
+
+  const handleCompressAll = async () => {
+    if (!compressJobs.length) return
+    setCompressProcessing(true)
+    for (const job of compressJobs) {
+      if (job.status === "processing") continue
+      if (job.status === "done" && job.resultUrl) continue
+      await processCompressJob(job)
+    }
+    setCompressProcessing(false)
+  }
+
+  const handleCompressZipDownload = async () => {
+    const completed = compressJobs.filter((job) => job.resultUrl)
+    if (!completed.length) return
+
+    const zip = new JSZip()
+    for (const job of completed) {
+      if (!job.resultUrl) continue
+      const blob = await fetch(job.resultUrl).then((res) => res.blob())
+      zip.file(job.downloadName || `compressed-${job.originalName}`, blob)
+    }
+
+    const zipBlob = await zip.generateAsync({ type: "blob" })
+    const url = URL.createObjectURL(zipBlob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `compressed-files-${Date.now()}.zip`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(url)
   }
 
   const renderPlaceholder = (label: string, description: string) => (
@@ -400,120 +638,15 @@ export default function ToolsPage() {
 
   const renderConvertSection = () => (
     <Card className="rounded-3xl border transition-colors">
-      <CardHeader className="space-y-1.5 p-4 sm:p-6">
-        <CardTitle className="text-base font-semibold sm:text-lg">Convert formats</CardTitle>
-        <p className="text-xs text-neutral-500 sm:text-sm">
-          Upload any PNG, JPG, WebP, or HEIC and download it in another format.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4 p-4 sm:p-6">
-        <input
-          ref={convertInputRef}
-          type="file"
-          accept="image/png,image/jpeg,image/jpg,image/webp,image/heic,image/heif,.heic,.heif"
-          className="hidden"
-          onChange={handleConvertFileSelect}
-        />
-        
-        <div className="flex flex-col gap-4 sm:flex-row">
-          <div className="flex-1">
-            <div
-              className={cn(
-                "relative flex min-h-[240px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-4 text-center transition-all sm:min-h-[280px] sm:p-6",
-                "border-neutral-200 bg-neutral-50/50",
-                "hover:border-neutral-300 hover:bg-neutral-100/50",
-                "touch-manipulation"
-              )}
-              onClick={() => convertInputRef.current?.click()}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault()
-                  convertInputRef.current?.click()
-                }
-              }}
-              style={{ touchAction: 'manipulation' }}
-            >
-              {convertLoading && (
-                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-white/95 backdrop-blur-sm text-neutral-700">
-                  <div className="relative mb-3 h-12 w-12">
-                    <div className="absolute inset-0 animate-spin rounded-full border-2 border-neutral-200 border-t-neutral-900" />
-                    <div className="animate-pulse-ring absolute inset-1 rounded-full border-2 border-neutral-200" />
-                  </div>
-                  <p className="text-sm font-medium">Converting…</p>
-                  <div className="mt-3 h-1.5 w-28 overflow-hidden rounded-full bg-neutral-200">
-                    <div className="animate-shimmer h-full w-1/3 rounded-full bg-neutral-900" />
-                  </div>
-                </div>
-              )}
-              {convertPreview ? (
-                <div className="relative flex min-h-[240px] w-full items-center justify-center overflow-hidden rounded-xl bg-white sm:min-h-[280px]">
-                  {/* Use regular img tag for data URLs to avoid Next.js Image restrictions in production */}
-                  <img
-                    src={convertPreview}
-                    alt="Source preview"
-                    className="max-h-full max-w-full object-contain"
-                    onError={(e) => {
-                      console.error("Preview image failed to load:", e)
-                      setConvertMessage("Preview failed to load, but you can still convert the file.")
-                      setConvertPreview(null)
-                    }}
-                  />
-                </div>
-              ) : isHeicFile && convertOriginalName ? (
-                <div className="flex h-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-neutral-300 bg-neutral-100/50 p-6 text-center">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full border-2 border-neutral-300 bg-white text-neutral-400">
-                    <svg
-                      width="24"
-                      height="24"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                      <polyline points="17 8 12 3 7 8" />
-                      <line x1="12" y1="3" x2="12" y2="15" />
-                    </svg>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-neutral-700">HEIC File Ready</p>
-                    <p className="text-xs text-neutral-500">{convertOriginalName}</p>
-                    <p className="text-xs text-neutral-400">Preview not available for HEIC files</p>
-                  </div>
-                </div>
-              ) : (
-                renderPlaceholder("Drop file or browse", "PNG • JPG • WEBP • HEIC")
-              )}
-            </div>
+      <CardHeader className="space-y-3 p-4 sm:p-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle className="text-base font-semibold sm:text-lg">Convert formats</CardTitle>
+            <p className="text-xs text-neutral-500 sm:text-sm">
+              Upload multiple PNG, JPG, WebP, or HEIC files and convert them in one go.
+            </p>
           </div>
-
-          {convertResult && (
-            <div className="flex-1">
-              <div
-                className="relative flex min-h-[240px] w-full items-center justify-center overflow-hidden rounded-2xl border border-neutral-200 bg-neutral-50/50 p-4 sm:min-h-[280px] sm:p-6"
-                style={checkerboardStyle}
-              >
-                {/* Use regular img tag for blob URLs to avoid Next.js Image restrictions in production */}
-                <img
-                  src={convertResult}
-                  alt="Converted preview"
-                  className="max-h-full max-w-full object-contain"
-                  onError={(e) => {
-                    console.error("Converted image failed to load:", e)
-                    setConvertMessage("Converted image preview failed to load, but you can still download it.")
-                  }}
-                />
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-col items-stretch gap-3 sm:flex-row sm:items-center">
-          <div className="flex-1">
+          <div className="w-full sm:w-56">
             <Select value={convertFormat} onValueChange={setConvertFormat}>
               <SelectTrigger className="w-full rounded-2xl text-sm">
                 <SelectValue placeholder="Choose format" />
@@ -527,65 +660,323 @@ export default function ToolsPage() {
               </SelectContent>
             </Select>
           </div>
-          {convertOriginalName && (
-            <p className="hidden text-sm text-neutral-500 sm:block">
-              {convertOriginalName}
-            </p>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-5 p-4 sm:p-6">
+        <input
+          ref={convertInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/jpg,image/webp,image/heic,image/heif,.heic,.heif"
+          multiple
+          className="hidden"
+          onChange={handleConvertFileSelect}
+        />
+
+        <div
+          className={cn(
+            "relative flex min-h-[200px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-5 text-center transition-colors sm:min-h-[220px]",
+            "border-neutral-200 bg-neutral-50/50 hover:border-neutral-300 hover:bg-neutral-100/50",
+            "touch-manipulation"
           )}
+          onClick={() => convertInputRef.current?.click()}
+          style={{ touchAction: "manipulation" }}
+        >
+          {convertProcessing && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-white/90 backdrop-blur-sm">
+              <div className="relative mb-3 h-10 w-10">
+                <div className="absolute inset-0 animate-spin rounded-full border-2 border-neutral-200 border-t-neutral-900" />
+                <div className="animate-pulse-ring absolute inset-1 rounded-full border-2 border-neutral-200" />
+              </div>
+              <p className="text-sm font-medium text-neutral-700">Processing batch…</p>
+            </div>
+          )}
+          <p className="text-sm font-medium text-neutral-700">Drop images or click to add</p>
+          <p className="text-xs text-neutral-500">
+            Supports PNG • JPG • WEBP • HEIC — add as many as you need
+          </p>
+          <p className="mt-2 text-[11px] uppercase tracking-[0.3em] text-neutral-400">
+            {convertJobs.length ? `${convertJobs.length} in queue` : "Queue is empty"}
+          </p>
         </div>
 
-        {convertMessage && (
-          <div className={cn(
-            "rounded-xl border px-3 py-2 text-xs sm:text-sm",
-            convertMessage.includes("complete") || convertMessage.includes("success")
-              ? "border-neutral-200 bg-neutral-50 text-neutral-600"
-              : "border-red-200 bg-red-50 text-red-600"
-          )}>
-            {convertMessage}
+        {convertJobs.length === 0 ? (
+          <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-500">
+            No files added yet. Drop your images above to start a batch conversion.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {convertJobs.map((job) => (
+              <div
+                key={job.id}
+                className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm text-neutral-600"
+              >
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                  <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border border-neutral-100 bg-white sm:h-16 sm:w-16">
+                      {job.previewUrl ? (
+                        <img src={job.previewUrl} alt={job.originalName} className="h-full w-full object-cover" />
+                      ) : job.heic ? (
+                        <span className="px-2 text-[10px] uppercase tracking-[0.3em] text-neutral-400">HEIC</span>
+                      ) : (
+                        <span className="text-[11px] text-neutral-400">Preview…</span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-neutral-900">{job.originalName}</p>
+                      <p className="text-xs text-neutral-500">
+                        {job.status === "processing"
+                          ? "Processing…"
+                          : job.status === "done"
+                            ? "Finished"
+                            : job.status === "error"
+                              ? "Needs attention"
+                              : "Ready"}
+                      </p>
+                      {job.message && (
+                        <p className={cn("text-xs", job.status === "error" ? "text-red-500" : "text-neutral-400")}>
+                          {job.message}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+                    <div className="flex items-center gap-2 sm:order-2">
+                      {job.resultUrl && (
+                        <Button asChild size="sm" variant="secondary" className="rounded-full px-4">
+                          <a href={job.resultUrl} download={job.downloadName || job.originalName}>
+                            Download
+                          </a>
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-full"
+                        onClick={() => handleRemoveConvertJob(job.id)}
+                        aria-label="Remove file"
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M18 6L6 18" />
+                          <path d="M6 6l12 12" />
+                        </svg>
+                      </Button>
+                    </div>
+                    <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border border-neutral-100 bg-white sm:order-1 sm:h-16 sm:w-16">
+                      {job.resultUrl ? (
+                        <img src={job.resultUrl} alt="Converted preview" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="text-[11px] text-neutral-400">
+                          {job.status === "processing" ? "…" : "Not converted"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </CardContent>
-      <CardFooter className="flex flex-col items-stretch gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-        <div className="flex items-center justify-between gap-2 sm:order-2 sm:flex-1 sm:justify-center">
+      <CardFooter className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+        <div className="flex flex-1 flex-col gap-3 sm:flex-row">
           <Button
-            onClick={handleConvert}
-            disabled={convertLoading || (!convertPreview && !isHeicFile)}
-            className="flex-1 text-sm sm:max-w-xs"
+            onClick={handleConvertAll}
+            disabled={!convertJobs.length || convertProcessing}
+            className="w-full rounded-full text-sm sm:w-auto sm:px-8"
           >
-            {convertLoading ? "Converting…" : "Convert image"}
+            {convertProcessing ? "Converting batch…" : `Convert ${convertJobs.length || ""} image(s)`}
           </Button>
-          {convertResult && (
-            <Button asChild variant="secondary" className="flex-1 text-sm sm:max-w-xs">
-              <a
-                href={convertResult}
-                download={convertFileName}
-              >
-                Download
-              </a>
-            </Button>
-          )}
+          <Button
+            variant="secondary"
+            disabled={!convertJobs.some((job) => job.resultUrl)}
+            onClick={handleConvertZipDownload}
+            className="w-full rounded-full text-sm sm:w-auto sm:px-8"
+          >
+            Download all as ZIP
+          </Button>
         </div>
         <Button
           variant="ghost"
-          size="icon"
-          onClick={handleConvertReset}
-          disabled={!convertPreview && !convertResult}
-          className="h-10 w-10 rounded-full self-end sm:order-1 sm:h-9 sm:w-9"
-          aria-label="Reset"
+          onClick={handleClearConvertJobs}
+          disabled={!convertJobs.length}
+          className="rounded-full text-sm"
         >
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          Clear list
+        </Button>
+      </CardFooter>
+    </Card>
+  )
+
+  const renderCompressSection = () => (
+    <Card className="rounded-3xl border transition-colors">
+      <CardHeader className="space-y-1.5 p-4 sm:p-6">
+        <CardTitle className="text-base font-semibold sm:text-lg">Compress images</CardTitle>
+        <p className="text-xs text-neutral-500 sm:text-sm">
+          Queue multiple PNG, JPG, or WebP files and compress them using TinyPNG.
+        </p>
+      </CardHeader>
+      <CardContent className="space-y-5 p-4 sm:p-6">
+        <input
+          ref={compressInputRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          multiple
+          className="hidden"
+          onChange={handleCompressFileSelect}
+        />
+
+        <div
+          className={cn(
+            "relative flex min-h-[200px] cursor-pointer flex-col items-center justify-center rounded-2xl border border-dashed p-5 text-center transition-colors sm:min-h-[220px]",
+            "border-neutral-200 bg-neutral-50/50 hover:border-neutral-300 hover:bg-neutral-100/50",
+            "touch-manipulation"
+          )}
+          onClick={() => compressInputRef.current?.click()}
+          style={{ touchAction: "manipulation" }}
+        >
+          {compressProcessing && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center rounded-2xl bg-white/90 backdrop-blur-sm">
+              <div className="relative mb-3 h-10 w-10">
+                <div className="absolute inset-0 animate-spin rounded-full border-2 border-neutral-200 border-t-neutral-900" />
+                <div className="animate-pulse-ring absolute inset-1 rounded-full border-2 border-neutral-200" />
+              </div>
+              <p className="text-sm font-medium text-neutral-700">Compressing batch…</p>
+            </div>
+          )}
+          <p className="text-sm font-medium text-neutral-700">Drop images or click to add</p>
+          <p className="text-xs text-neutral-500">PNG • JPG • WEBP — TinyPNG limits apply (5MB/file)</p>
+          <p className="mt-2 text-[11px] uppercase tracking-[0.3em] text-neutral-400">
+            {compressJobs.length ? `${compressJobs.length} in queue` : "Queue is empty"}
+          </p>
+        </div>
+
+        {compressJobs.length === 0 ? (
+          <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-500">
+            No files added yet. Add a few above to see compression results and savings.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {compressJobs.map((job) => (
+              <div
+                key={job.id}
+                className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm text-neutral-600"
+              >
+                <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                  <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border border-neutral-100 bg-white sm:h-16 sm:w-16">
+                      {job.previewUrl ? (
+                        <img src={job.previewUrl} alt={job.originalName} className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="text-[11px] text-neutral-400">Preview…</span>
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-neutral-900">{job.originalName}</p>
+                      {job.percentSaved !== undefined && job.status === "done" ? (
+                        <p className="text-xs text-emerald-600">
+                          −{job.percentSaved.toFixed(1)}% ({formatBytes(job.originalSize)} → {formatBytes(job.compressedSize)})
+                        </p>
+                      ) : (
+                        <p className="text-xs text-neutral-500">
+                          {job.status === "processing"
+                            ? "Compressing…"
+                            : job.status === "done"
+                              ? "Finished"
+                              : job.status === "error"
+                                ? "Needs attention"
+                                : "Ready"}
+                        </p>
+                      )}
+                      {job.message && (
+                        <p className={cn("text-xs", job.status === "error" ? "text-red-500" : "text-neutral-400")}>
+                          {job.message}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+                    <div className="flex items-center gap-2 sm:order-2">
+                      {job.resultUrl && (
+                        <Button asChild size="sm" variant="secondary" className="rounded-full px-4">
+                          <a href={job.resultUrl} download={job.downloadName || job.originalName}>
+                            Download
+                          </a>
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 rounded-full"
+                        onClick={() => handleRemoveCompressJob(job.id)}
+                        aria-label="Remove file"
+                      >
+                        <svg
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <path d="M18 6L6 18" />
+                          <path d="M6 6l12 12" />
+                        </svg>
+                      </Button>
+                    </div>
+                    <div className="flex h-16 w-16 items-center justify-center overflow-hidden rounded-xl border border-neutral-100 bg-white sm:order-1 sm:h-16 sm:w-16">
+                      {job.resultUrl ? (
+                        <img src={job.resultUrl} alt="Compressed preview" className="h-full w-full object-cover" />
+                      ) : (
+                        <span className="text-[11px] text-neutral-400">
+                          {job.status === "processing" ? "…" : "Not compressed"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </CardContent>
+      <CardFooter className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-6">
+        <div className="flex flex-1 flex-col gap-3 sm:flex-row">
+          <Button
+            onClick={handleCompressAll}
+            disabled={!compressJobs.length || compressProcessing}
+            className="w-full rounded-full text-sm sm:w-auto sm:px-8"
           >
-            <path d="M18 6L6 18" />
-            <path d="M6 6l12 12" />
-          </svg>
+            {compressProcessing
+              ? "Compressing batch…"
+              : `Compress ${compressJobs.length || ""} image(s)`}
+          </Button>
+          <Button
+            variant="secondary"
+            disabled={!compressJobs.some((job) => job.resultUrl)}
+            onClick={handleCompressZipDownload}
+            className="w-full rounded-full text-sm sm:w-auto sm:px-8"
+          >
+            Download all as ZIP
+          </Button>
+        </div>
+        <Button
+          variant="ghost"
+          onClick={handleClearCompressJobs}
+          disabled={!compressJobs.length}
+          className="rounded-full text-sm"
+        >
+          Clear list
         </Button>
       </CardFooter>
     </Card>
@@ -701,7 +1092,17 @@ export default function ToolsPage() {
           </Select>
         </div>
 
-        {activeTool === "remove-bg" ? renderRemoveSection() : renderConvertSection()}
+        {(() => {
+          switch (activeTool) {
+            case "convert-formats":
+              return renderConvertSection()
+            case "compress-image":
+              return renderCompressSection()
+            case "remove-bg":
+            default:
+              return renderRemoveSection()
+          }
+        })()}
       </div>
 
       <footer className="border-t border-neutral-200 bg-white">
